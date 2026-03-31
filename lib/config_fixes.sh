@@ -14,10 +14,10 @@ apply_gunyah_config() {
     GKI_DEFCONFIG="$KERNEL_SRC/arch/arm64/configs/gki_defconfig"
     
     # Check if ARM64 architecture (required for GUNYAH_DRIVERS)
-    if ! grep -q "CONFIG_ARM64=y" "$GKI_DEFCONFIG"; then
-        log "Warning: CONFIG_ARM64 not enabled, skipping Gunyah config"
-        return 0
-    fi
+    #if ! grep -q "CONFIG_ARM64=y" "$GKI_DEFCONFIG"; then
+    #    log "Warning: CONFIG_ARM64 not enabled, skipping Gunyah config"
+    #    return 0
+    #fi
     
     # Enable core Gunyah virtualization support
     if ! grep -q "CONFIG_GUNYAH=" "$GKI_DEFCONFIG"; then
