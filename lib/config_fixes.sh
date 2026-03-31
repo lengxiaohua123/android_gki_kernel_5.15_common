@@ -7,6 +7,136 @@
 MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$MODULE_DIR/common.sh"
 
+# Apply Gunyah hypervisor configuration
+apply_gunyah_config() {
+    log "Applying Gunyah hypervisor configuration..."
+    
+    GKI_DEFCONFIG="$KERNEL_SRC/arch/arm64/configs/gki_defconfig"
+    
+    # Check if ARM64 architecture (required for GUNYAH_DRIVERS)
+    if ! grep -q "CONFIG_ARM64=y" "$GKI_DEFCONFIG"; then
+        log "Warning: CONFIG_ARM64 not enabled, skipping Gunyah config"
+        return 0
+    fi
+    
+    # Enable core Gunyah virtualization support
+    if ! grep -q "CONFIG_GUNYAH=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GUNYAH=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GUNYAH=y"
+    else
+        sed -i 's/CONFIG_GUNYAH=.*/CONFIG_GUNYAH=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_GUNYAH=y"
+    fi
+    
+    # Enable Gunyah Secure VM Loader
+    if ! grep -q "CONFIG_GH_SECURE_VM_LOADER=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GH_SECURE_VM_LOADER=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GH_SECURE_VM_LOADER=y"
+    else
+        sed -i 's/CONFIG_GH_SECURE_VM_LOADER=.*/CONFIG_GH_SECURE_VM_LOADER=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_GH_SECURE_VM_LOADER=y"
+    fi
+    
+    # Enable Gunyah Proxy Scheduler
+    if ! grep -q "CONFIG_GH_PROXY_SCHED=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GH_PROXY_SCHED=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GH_PROXY_SCHED=y"
+    else
+        sed -i 's/CONFIG_GH_PROXY_SCHED=.*/CONFIG_GH_PROXY_SCHED=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_G_GH_PROXY_SCHEDH_PROXY_SCHED=y"
+    fi
+    
+    # Enable Gunyah Drivers submenu (requires ARM64)
+    if ! grep -q "CONFIG_GUNYAH_DRIVERS=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GUNYAH_DRIVERS=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GUNYAH_DRIVERS=y"
+    else
+        sed -i 's/CONFIG_GUNYAH_DRIVERS=.*/CONFIG_GUNYAH_DRIVERS=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_GUNYAH_DRIVERS=y"
+    fi
+    
+    # Enable Gunyah Virtual Watchdog (requires QCOM_WDT_CORE)
+    if grep -q "CONFIG_QCOM_WDT_CORE=" "$GKI_DEFCONFIG"; then
+        if ! grep -q "CONFIG_GH_VIRT_WATCHDOG=" "$GKI_DEFCONFIG"; then
+            echo "CONFIG_GH_VIRT_WATCHDOG=y" >> "$GKI_DEFCONFIG"
+            log "Added CONFIG_GH_VIRT_WATCHDOG=y"
+        else
+            sed -i 's/CONFIG_GH_VIRT_WATCHDOG=.*/CONFIG_GH_VIRT_WATCHDOG=y/' "$GKI_DEFCONFIG"
+            log "Updated CONFIG_GH_VIRT_WATCHDOG=y"
+        fi
+    else
+        log "Warning: CONFIG_QCOM_WDT_CORE not found, skipping GH_VIRT_WATCHDOG"
+    fi
+    
+    # Enable Gunyah sysfs interface (requires SYSFS)
+    if grep -q "CONFIG_SYSFS=y" "$GKI_DEFCONFIG"; then
+        if ! grep -q "CONFIG_GH_CTRL=" "$GKI_DEFCONFIG"; then
+            echo "CONFIG_GH_CTRL=y" >> "$GKI_DEFCONFIG"
+            log "Added CONFIG_GH_CTRL=y"
+        else
+            sed -i 's/CONFIG_GH_CTRL=.*/CONFIG_GH_CTRL=y/' "$GKI_DEFCONFIG"
+            log "Updated CONFIG_GH_CTRL=y"
+        fi
+    else
+        log "Warning: CONFIG_SYSFS not enabled, skipping GH_CTRL"
+    fi
+    
+    # Enable Gunyah Doorbell driver (VM-to-VM communication)
+    if ! grep -q "CONFIG_GH_DBL=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GH_DBL=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GH_DBL=y"
+    else
+        sed -i 's/CONFIG_GH_DBL=.*/CONFIG_GH_DBL=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_GH_DBL=y"
+    fi
+    
+    # Enable Gunyah Message Queue driver
+    if ! grep -q "CONFIG_GH_MSGQ=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GH_MSGQ=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GH_MSGQ=y"
+    else
+        sed -i 's/CONFIG_GH_MSGQ=.*/CONFIG_GH_MSGQ=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_GH_MSGQ=y"
+    fi
+    
+    # Enable Gunyah Resource Manager driver (required for IRQ_LEND and MEM_NOTIFIER)
+    if ! grep -q "CONFIG_GH_RM_DRV=" "$GKI_DEFCONFIG"; then
+        echo "CONFIG_GH_RM_DRV=y" >> "$GKI_DEFCONFIG"
+        log "Added CONFIG_GH_RM_DRV=y"
+    else
+        sed -i 's/CONFIG_GH_RM_DRV=.*/CONFIG_GH_RM_DRV=y/' "$GKI_DEFCONFIG"
+        log "Updated CONFIG_GH_RM_DRV=y"
+    fi
+    
+    # Enable Gunyah IRQ Lending Framework (requires GH_RM_DRV)
+    if grep -q "CONFIG_GH_RM_DRV=y" "$GKI_DEFCONFIG"; then
+        if ! grep -q "CONFIG_GH_IRQ_LEND=" "$GKI_DEFCONFIG"; then
+            echo "CONFIG_GH_IRQ_LEND=y" >> "$GKI_DEFCONFIG"
+            log "Added CONFIG_GH_IRQ_LEND=y"
+        else
+            sed -i 's/CONFIG_GH_IRQ_LEND=.*/CONFIG_GH_IRQ_LEND=y/' "$GKI_DEFCONFIG"
+            log "Updated CONFIG_GH_IRQ_LEND=y"
+        fi
+    else
+        log "Warning: CONFIG_GH_RM_DRV not enabled, skipping GH_IRQ_LEND"
+    fi
+    
+    # Enable Gunyah Memory Resource Notification (requires GH_RM_DRV)
+    if grep -q "CONFIG_GH_RM_DRV=y" "$GKI_DEFCONFIG"; then
+        if ! grep -q "CONFIG_GH_MEM_NOTIFIER=" "$GKI_DEFCONFIG"; then
+            echo "CONFIG_GH_MEM_NOTIFIER=y" >> "$GKI_DEFCONFIG"
+            log "Added CONFIG_GH_MEM_NOTIFIER=y"
+        else
+            sed -i 's/CONFIG_GH_MEM_NOTIFIER=.*/CONFIG_GH_MEM_NOTIFIER=y/' "$GKI_DEFCONFIG"
+            log "Updated CONFIG_GH_MEM_NOTIFIER=y"
+        fi
+    else
+        log "Warning: CONFIG_GH_RM_DRV not enabled, skipping GH_MEM_NOTIFIER"
+    fi
+    
+    log "Gunyah hypervisor configuration applied."
+}
+
 # Apply all configuration fixes
 apply_config_fixes() {
     log "Applying kernel configuration fixes..."
@@ -71,6 +201,8 @@ apply_config_fixes() {
         log "✓ stamp.bzl patched (removed -maybe-dirty, injected timestamp ${CURRENT_EPOCH})"
     fi
     
+    # Apply Gunyah hypervisor configuration
+    apply_gunyah_config
+    
     log "Configuration fixes applied."
 }
-
