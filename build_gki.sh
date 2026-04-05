@@ -250,12 +250,16 @@ if [ "$SKIP_BUILD" = false ]; then
     # 确保 BAZEL_FLAGS 有默认值，避免空变量导致命令解析错误
     BAZEL_FLAGS="${BAZEL_FLAGS:-}"
     
-    # Disable KMI strict mode for custom builds
+    # Disable KMI strict mode for custom builds (GUNYAH modifies KASAN/CFI symbols)
     export KMI_SYMBOL_LIST_STRICT_MODE=0
-    
+    export KMI_ENFORCED=0
+    export TRIM_NONLISTED_KMI=0
+
     $PREFIX_CMD tools/bazel run \
         --action_env=KMI_SYMBOL_LIST_STRICT_MODE=0 \
         --action_env=KMI_ENFORCED=0 \
+        --action_env=TRIM_NONLISTED_KMI=0 \
+        --action_env=KBUILD_VERBOSE=1 \
         ${BAZEL_FLAGS} \
         ${BAZEL_PERF_FLAGS} \
         ${BAZEL_TIMESTAMP_FLAGS} \
