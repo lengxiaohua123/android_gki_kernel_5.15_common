@@ -146,6 +146,21 @@ customize_version
 # 5. CCache Configuration
 configure_ccache
 
+# 在构建脚本中，Bazel 命令前添加
+pre_build_abi_update() {
+    log "Running pre-build ABI update..."
+    
+    cd "$WORKSPACE_DIR"
+    
+    # 先尝试更新符号列表
+    $PREFIX_CMD tools/bazel run \
+        //common:kernel_aarch64_abi_update_symbol_list || true
+    
+    # 然后尝试无差异更新 ABI
+    $PREFIX_CMD tools/bazel run \
+        //common:kernel_aarch64_abi_nodiff_update || true
+}
+
 # 6. Build (if not skipped)
 if [ "$SKIP_BUILD" = false ]; then
     log "Starting Bazel Build..."
@@ -254,6 +269,9 @@ if [ "$SKIP_BUILD" = false ]; then
     export KMI_SYMBOL_LIST_STRICT_MODE=0
     export KMI_ENFORCED=0
     export TRIM_NONLISTED_KMI=0
+    
+    # 在构建前调用
+    pre_build_abi_update
 
     $PREFIX_CMD tools/bazel run \
         --action_env=KMI_SYMBOL_LIST_STRICT_MODE=0 \
