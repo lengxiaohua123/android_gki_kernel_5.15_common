@@ -6,6 +6,44 @@
 MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$MODULE_DIR/common.sh"
 
+# 新增函数：禁用 KMI 严格模式
+disable_kmi_strict_mode() {
+    log "Disabling KMI strict mode..."
+    
+    # 方法 1：尝试修改 BUILD.bazel
+    local build_bazel="$KERNEL_SRC/../BUILD.bazel"
+    [ -f "$build_bazel" ] || build_bazel="$KERNEL_SRC/BUILD.bazel"
+    
+    if [ -f "$build_bazel" ]; then
+        cp "$build_bazel" "$build_bazel.bak"
+        sed -i 's/kmi_symbol_list_strict_mode = True/kmi_symbol_list_strict_mode = False/g' "$build_bazel"
+        log "✓ Modified BUILD.bazel"
+    fi
+    
+    # 方法 2：设置环境变量（虽然可能无效，但保留）
+    export KMI_SYMBOL_LIST_STRICT_MODE=0
+    export KMI_ENFORCED=0
+    export TRIM_NONLISTED_KMI=0
+}
+
+# 新增函数：修补 ABI 符号列表
+patch_abi_symbol_list() {
+    log "Patching ABI symbol list..."
+    
+    local symbol_list="$KERNEL_SRC/android/abi_gki_aarch64"
+    
+    if [ -f "$symbol_list" ]; then
+        cp "$symbol_list" "$symbol_list.bak.$(date +%s)"
+        
+        # 添加 GUNYAH 需要的新符号
+        for sym in __cfi_slowpath_diag __ubsan_handle_cfi_check_fail_abort kasan_flag_enabled; do
+            grep -q "^$sym$" "$symbol_list" || echo "$sym" >> "$symbol_list"
+        done
+        
+        log "✓ Patched abi_gki_aarch64"
+    fi
+}
+
 # Apply all configuration fixes
 apply_config_fixes() {
     log "Applying kernel configuration fixes..."
@@ -118,6 +156,12 @@ apply_config_fixes() {
     else
         warn "stamp.bzl not found at: $STAMP_BZL"
     fi
+
+    # ========== 新增：禁用 KMI 严格模式 ==========
+    disable_kmi_strict_mode
+    
+    # ========== 新增：修补 ABI 符号列表 ==========
+    patch_abi_symbol_list
     
     log "========================================"
     log "✓ All configuration fixes applied:"
