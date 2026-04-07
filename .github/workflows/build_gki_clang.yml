@@ -1,96 +1,131 @@
-name: Build GKI with Google Clang
+#!/bin/bash
+set -e
 
-on:
-  schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KERNEL_SRC="$SCRIPT_DIR"
+DIST_OUTPUT_DIR="$SCRIPT_DIR/out/dist"
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 使用 Node 24
+# ========== 关键：使用 Google Clang ==========
+if [ -n "$CLANG_PATH" ]; then
+    CLANG_DIR="$CLANG_PATH"
+elif [ -d "$HOME/toolchains/clang" ]; then
+    CLANG_DIR="$HOME/toolchains/clang/bin"
+else
+    echo "Downloading Google Clang..."
+    mkdir -p $HOME/toolchains
+    cd $HOME/toolchains
+    wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784e.tar.gz
+    tar -xzf clang-r450784e.tar.gz 2>/dev/null || true
+    mv clang-r450784e clang 2>/dev/null || true
+    CLANG_DIR="$HOME/toolchains/clang/bin"
+    cd "$SCRIPT_DIR"
+fi
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
+# 验证 Clang
+if [ ! -f "$CLANG_DIR/clang" ]; then
+    echo "ERROR: Google Clang not found at $CLANG_DIR"
+    exit 1
+fi
 
-    steps:
-    - name: Checkout Source
-      uses: actions/checkout@v4
+echo "Using Google Clang: $CLANG_DIR"
+$CLANG_DIR/clang --version
 
-    - name: Free Disk Space
-      run: |
-        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost $AGENT_TOOLSDIRECTORY /usr/local/lib/android
-        sudo docker image prune --all --force || true
-        df -h
+# 设置工具链
+export PATH="$CLANG_DIR:$PATH"
+export ARCH=arm64
+export CROSS_COMPILE=aarch64-linux-gnu-
+export CC="$CLANG_DIR/clang"
+export AR="$CLANG_DIR/llvm-ar"
+export NM="$CLANG_DIR/llvm-nm"
+export STRIP="$CLANG_DIR/llvm-strip"
+export OBJCOPY="$CLANG_DIR/llvm-objcopy"
+export OBJDUMP="$CLANG_DIR/llvm-objdump"
+export READELF="$CLANG_DIR/llvm-readelf"
+export LD="$CLANG_DIR/ld.lld"
+export LLVM=1
+export LLVM_IAS=1
 
-    - name: Setup Swap
-      run: |
-        sudo swapoff /swapfile 2>/dev/null || true
-        sudo rm -f /swapfile
-        sudo fallocate -l 8G /swapfile
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        free -h
+mkdir -p "$DIST_OUTPUT_DIR"
 
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          git zip unzip curl wget python3 bc rsync \
-          cpio ncurses-dev libxml2-utils build-essential \
-          flex bison libssl-dev libelf-dev xz-utils
+log() { echo "[$(date '+%H:%M:%S')] $1"; }
+error() { echo "[ERROR] $1" >&2; exit 1; }
 
-    - name: Cache Google Clang
-      uses: actions/cache@v4
-      with:
-        path: ~/toolchains/clang
-        key: google-clang-r450784e-v2
+log "Starting build with Google Clang..."
 
-    - name: Download Google Clang
-      run: |
-        set -e
-        CLANG_DIR="$HOME/toolchains/clang"
-        
-        if [ -f "$CLANG_DIR/bin/clang" ]; then
-          echo "Clang already cached"
-        else
-          echo "Downloading Google Clang..."
-          mkdir -p ~/toolchains
-          cd ~/toolchains
-          
-          # 尝试多个镜像
-          if wget -q --timeout=60 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz" -O clang.tar.gz 2>/dev/null; then
-            echo "Downloaded from Android"
-            mkdir -p clang
-            tar -xzf clang.tar.gz -C clang
-            rm clang.tar.gz
-          elif wget -q --timeout=60 "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang+llvm-15.0.7-x86_64-linux-gnu-ubuntu-22.04.tar.xz" -O clang.tar.xz 2>/dev/null; then
-            echo "Downloaded from GitHub"
-            tar -xf clang.tar.xz
-            mv clang+llvm-15.0.7-x86_64-linux-gnu-ubuntu-22.04 clang
-            rm clang.tar.xz
-          else
-            echo "ERROR: Failed to download Clang"
-            exit 1
-          fi
-        fi
-        
-        # 验证
-        echo "Clang location: $CLANG_DIR"
-        ls -la "$CLANG_DIR/bin/" | head -5
-        "$CLANG_DIR/bin/clang" --version
-        
-        echo "CLANG_PATH=$CLANG_DIR/bin" >> $GITHUB_ENV
+cd "$KERNEL_SRC" || error "Cannot enter $KERNEL_SRC"
+[ -d "arch/arm64" ] || error "Kernel source not found"
 
-    - name: Build Kernel
-      run: |
-        chmod +x build_gki_clang.sh
-        ./build_gki_clang.sh
+log "Cleaning..."
+make ARCH=arm64 CC="$CC" LD="$LD" mrproper 2>/dev/null || true
 
-    - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: GKI-Kernel-5.15-Gunyah
-        path: out/dist/*
-        retention-days: 30
+# ========== 关键修复：正确的配置顺序 ==========
+log "Generating base gki_defconfig..."
+make ARCH=arm64 CC="$CC" LD="$LD" gki_defconfig
+
+log "Adding GUNYAH to .config..."
+
+# 关键：必须按依赖顺序添加
+# 1. 先启用 GUNYAH（基础）
+# 2. 再启用 GUNYAH_DRIVERS（菜单容器）
+# 3. 最后启用具体驱动
+
+cat >> .config << 'EOF'
+# Gunyah Hypervisor Support
+CONFIG_GUNYAH=y
+CONFIG_GH_SECURE_VM_LOADER=y
+CONFIG_GH_PROXY_SCHED=y
+
+# Gunyah Drivers Menu (必须在前，才能包含后面的选项)
+CONFIG_GUNYAH_DRIVERS=y
+
+# Gunyah Drivers (在 if GUNYAH_DRIVERS 块内)
+CONFIG_GH_DBL=y
+CONFIG_GH_MSGQ=y
+CONFIG_GH_RM_DRV=y
+CONFIG_GH_IRQ_LEND=y
+CONFIG_GH_MEM_NOTIFIER=y
+CONFIG_GH_CTRL=y
+EOF
+
+log "✓ GUNYAH appended to .config"
+
+# 使用 syncconfig 或 olddefconfig 同步（不要重新生成）
+log "Syncing configuration..."
+make ARCH=arm64 CC="$CC" LD="$LD" syncconfig 2>/dev/null || \
+make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
+
+# 关键：检查 GUNYAH_DRIVERS 是否为 y（不是 m！）
+log "Checking GUNYAH_DRIVERS status..."
+grep "^CONFIG_GUNYAH_DRIVERS" .config || echo "GUNYAH_DRIVERS not set!"
+
+# 验证 GUNYAH 配置
+log "Verifying GUNYAH configuration..."
+if grep -q "^CONFIG_GUNYAH=y" .config; then
+    log "✓ CONFIG_GUNYAH is enabled"
+    log "All GUNYAH configs:"
+    grep -E "^CONFIG_(GH_|GUNYAH)" .config || true
+else
+    log "GUNYAH status:"
+    grep -E "CONFIG_GUNYAH" .config || echo "Not found"
+    error "CONFIG_GUNYAH not enabled!"
+fi
+
+log "Building kernel..."
+make ARCH=arm64 CC="$CC" LD="$LD" -j$(nproc) Image Image.gz 2>&1 | tee "$DIST_OUTPUT_DIR/build.log"
+
+# 复制输出
+cp arch/arm64/boot/Image "$DIST_OUTPUT_DIR/" 2>/dev/null || true
+cp arch/arm64/boot/Image.gz "$DIST_OUTPUT_DIR/" 2>/dev/null || true
+cp vmlinux "$DIST_OUTPUT_DIR/" 2>/dev/null || true
+cp .config "$DIST_OUTPUT_DIR/config"
+
+[ -f "$DIST_OUTPUT_DIR/Image" ] || [ -f "$DIST_OUTPUT_DIR/Image.gz" ] || error "Build failed"
+
+# 验证输出 config
+log "Checking GUNYAH in output config..."
+grep -E "^CONFIG_(GH_|GUNYAH)" "$DIST_OUTPUT_DIR/config" || log "Warning: GUNYAH not in output config"
+
+log "========================================"
+log "Build Complete!"
+ls -lh "$DIST_OUTPUT_DIR"
+log "========================================"
