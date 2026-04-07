@@ -58,43 +58,56 @@ cd "$KERNEL_SRC" || error "Cannot enter $KERNEL_SRC"
 log "Cleaning..."
 make ARCH=arm64 CC="$CC" LD="$LD" mrproper 2>/dev/null || true
 
-# ========== 方法2改进：生成基础配置后追加 GUNYAH ==========
+# ========== 关键修复：正确的配置顺序 ==========
 log "Generating base gki_defconfig..."
 make ARCH=arm64 CC="$CC" LD="$LD" gki_defconfig
 
 log "Adding GUNYAH to .config..."
 
-# 直接追加到 .config（而不是修改 gki_defconfig）
-# 这样避免 make gki_defconfig 重新生成时过滤掉
+# 关键：必须按依赖顺序添加
+# 1. 先启用 GUNYAH（基础）
+# 2. 再启用 GUNYAH_DRIVERS（菜单容器）
+# 3. 最后启用具体驱动
+
 cat >> .config << 'EOF'
+# Gunyah Hypervisor Support
+CONFIG_GUNYAH=y
+CONFIG_GH_SECURE_VM_LOADER=y
+CONFIG_GH_PROXY_SCHED=y
+
+# Gunyah Drivers Menu (必须在前，才能包含后面的选项)
+CONFIG_GUNYAH_DRIVERS=y
+
+# Gunyah Drivers (在 if GUNYAH_DRIVERS 块内)
 CONFIG_GH_DBL=y
+CONFIG_GH_MSGQ=y
+CONFIG_GH_RM_DRV=y
 CONFIG_GH_IRQ_LEND=y
 CONFIG_GH_MEM_NOTIFIER=y
-CONFIG_GH_MSGQ=y
-CONFIG_GH_PROXY_SCHED=y
-CONFIG_GH_RM_DRV=y
-CONFIG_GH_SECURE_VM_LOADER=y
-CONFIG_GUNYAH=y
-CONFIG_GUNYAH_DRIVERS=y
+CONFIG_GH_CTRL=y
 EOF
 
 log "✓ GUNYAH appended to .config"
 
-# 使用 olddefconfig 同步依赖（不重新生成整个配置）
-log "Syncing configuration with olddefconfig..."
+# 使用 syncconfig 或 olddefconfig 同步（不要重新生成）
+log "Syncing configuration..."
+make ARCH=arm64 CC="$CC" LD="$LD" syncconfig 2>/dev/null || \
 make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
+
+# 关键：检查 GUNYAH_DRIVERS 是否为 y（不是 m！）
+log "Checking GUNYAH_DRIVERS status..."
+grep "^CONFIG_GUNYAH_DRIVERS" .config || echo "GUNYAH_DRIVERS not set!"
 
 # 验证 GUNYAH 配置
 log "Verifying GUNYAH configuration..."
 if grep -q "^CONFIG_GUNYAH=y" .config; then
     log "✓ CONFIG_GUNYAH is enabled"
-    log "GUNYAH configs in .config:"
-    grep -E "^CONFIG_(GH_|GUNYAH)" .config
+    log "All GUNYAH configs:"
+    grep -E "^CONFIG_(GH_|GUNYAH)" .config || true
 else
-    # 检查是否被注释或设为 n
-    log "GUNYAH status in .config:"
-    grep -E "CONFIG_(GH_|GUNYAH)" .config || echo "Not found at all"
-    error "CONFIG_GUNYAH not enabled in .config!"
+    log "GUNYAH status:"
+    grep -E "CONFIG_GUNYAH" .config || echo "Not found"
+    error "CONFIG_GUNYAH not enabled!"
 fi
 
 log "Building kernel..."
@@ -110,7 +123,7 @@ cp .config "$DIST_OUTPUT_DIR/config"
 
 # 验证输出 config
 log "Checking GUNYAH in output config..."
-grep -E "^CONFIG_(GH_|GUNYAH)" "$DIST_OUTPUT_DIR/config" || log "Warning: GUNYAH not found in output config"
+grep -E "^CONFIG_(GH_|GUNYAH)" "$DIST_OUTPUT_DIR/config" || log "Warning: GUNYAH not in output config"
 
 log "========================================"
 log "Build Complete!"
