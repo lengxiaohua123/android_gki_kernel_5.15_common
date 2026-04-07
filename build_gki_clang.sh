@@ -58,25 +58,15 @@ cd "$KERNEL_SRC" || error "Cannot enter $KERNEL_SRC"
 log "Cleaning..."
 make ARCH=arm64 CC="$CC" LD="$LD" mrproper 2>/dev/null || true
 
-# ========== 方法2：直接修改 gki_defconfig 文件 ==========
-log "Modifying gki_defconfig to add GUNYAH..."
+# ========== 方法2改进：生成基础配置后追加 GUNYAH ==========
+log "Generating base gki_defconfig..."
+make ARCH=arm64 CC="$CC" LD="$LD" gki_defconfig
 
-GKI_DEFCONFIG="arch/arm64/configs/gki_defconfig"
+log "Adding GUNYAH to .config..."
 
-# 检查 defconfig 文件是否存在
-if [ ! -f "$GKI_DEFCONFIG" ]; then
-    error "gki_defconfig not found at $GKI_DEFCONFIG"
-fi
-
-# 备份原文件
-cp "$GKI_DEFCONFIG" "$GKI_DEFCONFIG.bak.$(date +%s)"
-
-# 删除旧的 GUNYAH 配置（避免重复）
-sed -i '/^CONFIG_GUNYAH/d' "$GKI_DEFCONFIG" 2>/dev/null || true
-sed -i '/^CONFIG_GH_/d' "$GKI_DEFCONFIG" 2>/dev/null || true
-
-# 按字母顺序添加 GUNYAH 配置
-cat >> "$GKI_DEFCONFIG" << 'EOF'
+# 直接追加到 .config（而不是修改 gki_defconfig）
+# 这样避免 make gki_defconfig 重新生成时过滤掉
+cat >> .config << 'EOF'
 CONFIG_GH_DBL=y
 CONFIG_GH_IRQ_LEND=y
 CONFIG_GH_MEM_NOTIFIER=y
@@ -88,11 +78,11 @@ CONFIG_GUNYAH=y
 CONFIG_GUNYAH_DRIVERS=y
 EOF
 
-log "✓ GUNYAH config added to gki_defconfig"
+log "✓ GUNYAH appended to .config"
 
-# 重新生成 .config
-log "Generating .config from modified gki_defconfig..."
-make ARCH=arm64 CC="$CC" LD="$LD" gki_defconfig
+# 使用 olddefconfig 同步依赖（不重新生成整个配置）
+log "Syncing configuration with olddefconfig..."
+make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
 
 # 验证 GUNYAH 配置
 log "Verifying GUNYAH configuration..."
@@ -101,12 +91,11 @@ if grep -q "^CONFIG_GUNYAH=y" .config; then
     log "GUNYAH configs in .config:"
     grep -E "^CONFIG_(GH_|GUNYAH)" .config
 else
-    error "CONFIG_GUNYAH not found in .config!"
+    # 检查是否被注释或设为 n
+    log "GUNYAH status in .config:"
+    grep -E "CONFIG_(GH_|GUNYAH)" .config || echo "Not found at all"
+    error "CONFIG_GUNYAH not enabled in .config!"
 fi
-
-# 同步配置依赖项
-log "Syncing configuration..."
-make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
 
 log "Building kernel..."
 make ARCH=arm64 CC="$CC" LD="$LD" -j$(nproc) Image Image.gz 2>&1 | tee "$DIST_OUTPUT_DIR/build.log"
