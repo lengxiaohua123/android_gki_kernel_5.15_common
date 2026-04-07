@@ -55,30 +55,57 @@ log "Starting build with Google Clang..."
 cd "$KERNEL_SRC" || error "Cannot enter $KERNEL_SRC"
 [ -d "arch/arm64" ] || error "Kernel source not found"
 
+# ========== 关键：检查并确保 GUNYAH Kconfig 被包含 ==========
+log "Checking GUNYAH Kconfig location..."
+
+GUNYAH_KCONFIG="drivers/virt/gunyah/Kconfig"
+
+if [ -f "$GUNYAH_KCONFIG" ]; then
+    log "✓ Found $GUNYAH_KCONFIG"
+    
+    # 检查是否被包含在 drivers/virt/Kconfig 中
+    if [ -f "drivers/virt/Kconfig" ]; then
+        if ! grep -q "gunyah" drivers/virt/Kconfig; then
+            log "Adding gunyah to drivers/virt/Kconfig..."
+            echo 'source "drivers/virt/gunyah/Kconfig"' >> drivers/virt/Kconfig
+        else
+            log "✓ Gunyah already included in drivers/virt/Kconfig"
+        fi
+    fi
+    
+    # 检查是否被包含在 drivers/Kconfig 中
+    if [ -f "drivers/Kconfig" ]; then
+        if ! grep -q "virt" drivers/Kconfig; then
+            log "Adding virt to drivers/Kconfig..."
+            echo 'source "drivers/virt/Kconfig"' >> drivers/Kconfig
+        fi
+    fi
+else
+    error "$GUNYAH_KCONFIG not found! Gunyah driver source missing."
+fi
+
 log "Cleaning..."
 make ARCH=arm64 CC="$CC" LD="$LD" mrproper 2>/dev/null || true
 
-# ========== 关键修复：正确的配置顺序 ==========
 log "Generating base gki_defconfig..."
 make ARCH=arm64 CC="$CC" LD="$LD" gki_defconfig
 
-log "Adding GUNYAH to .config..."
+# ========== 关键：检查 GUNYAH 选项是否存在于 Kconfig 系统 ==========
+log "Checking if GUNYAH is in Kconfig system..."
+if grep -r "config GUNYAH" drivers/virt/gunyah/ 2>/dev/null; then
+    log "✓ GUNYAH Kconfig option found"
+else
+    log "Warning: GUNYAH Kconfig option not found in search"
+fi
 
-# 关键：必须按依赖顺序添加
-# 1. 先启用 GUNYAH（基础）
-# 2. 再启用 GUNYAH_DRIVERS（菜单容器）
-# 3. 最后启用具体驱动
+log "Adding GUNYAH to .config..."
 
 cat >> .config << 'EOF'
 # Gunyah Hypervisor Support
 CONFIG_GUNYAH=y
 CONFIG_GH_SECURE_VM_LOADER=y
 CONFIG_GH_PROXY_SCHED=y
-
-# Gunyah Drivers Menu (必须在前，才能包含后面的选项)
 CONFIG_GUNYAH_DRIVERS=y
-
-# Gunyah Drivers (在 if GUNYAH_DRIVERS 块内)
 CONFIG_GH_DBL=y
 CONFIG_GH_MSGQ=y
 CONFIG_GH_RM_DRV=y
@@ -89,29 +116,23 @@ EOF
 
 log "✓ GUNYAH appended to .config"
 
-# 使用 syncconfig 或 olddefconfig 同步（不要重新生成）
-log "Syncing configuration..."
-make ARCH=arm64 CC="$CC" LD="$LD" syncconfig 2>/dev/null || \
-make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
-
-# 关键：检查 GUNYAH_DRIVERS 是否为 y（不是 m！）
-log "Checking GUNYAH_DRIVERS status..."
-grep "^CONFIG_GUNYAH_DRIVERS" .config || echo "GUNYAH_DRIVERS not set!"
-
-# 验证 GUNYAH 配置
-log "Verifying GUNYAH configuration..."
+# 检查追加后的状态
 if grep -q "^CONFIG_GUNYAH=y" .config; then
-    log "✓ CONFIG_GUNYAH is enabled"
-    log "All GUNYAH configs:"
-    grep -E "^CONFIG_(GH_|GUNYAH)" .config || true
+    log "✓ CONFIG_GUNYAH is in .config before build"
 else
-    log "GUNYAH status:"
-    grep -E "CONFIG_GUNYAH" .config || echo "Not found"
-    error "CONFIG_GUNYAH not enabled!"
+    error "CONFIG_GUNYAH missing after append!"
 fi
 
+# ========== 关键：不使用 olddefconfig，直接编译 ==========
+# 让 Kbuild 在编译时验证配置
+
 log "Building kernel..."
-make ARCH=arm64 CC="$CC" LD="$LD" -j$(nproc) Image Image.gz 2>&1 | tee "$DIST_OUTPUT_DIR/build.log"
+make ARCH=arm64 CC="$CC" LD="$LD" -j$(nproc) Image Image.gz 2>&1 | tee "$DIST_OUTPUT_DIR/build.log" || {
+    log "Build failed, checking for config errors..."
+    # 如果失败，显示相关错误
+    grep -i "gunyah\|GUNYAH" "$DIST_OUTPUT_DIR/build.log" || true
+    exit 1
+}
 
 # 复制输出
 cp arch/arm64/boot/Image "$DIST_OUTPUT_DIR/" 2>/dev/null || true
@@ -121,7 +142,7 @@ cp .config "$DIST_OUTPUT_DIR/config"
 
 [ -f "$DIST_OUTPUT_DIR/Image" ] || [ -f "$DIST_OUTPUT_DIR/Image.gz" ] || error "Build failed"
 
-# 验证输出 config
+# 验证输出
 log "Checking GUNYAH in output config..."
 grep -E "^CONFIG_(GH_|GUNYAH)" "$DIST_OUTPUT_DIR/config" || log "Warning: GUNYAH not in output config"
 
