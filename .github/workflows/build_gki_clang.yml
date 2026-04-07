@@ -5,6 +5,9 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 使用 Node 24
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -36,29 +39,49 @@ jobs:
         sudo apt-get install -y \
           git zip unzip curl wget python3 bc rsync \
           cpio ncurses-dev libxml2-utils build-essential \
-          flex bison libssl-dev libelf-dev
-        # 不安装 clang，使用 Google 的
+          flex bison libssl-dev libelf-dev xz-utils
 
     - name: Cache Google Clang
       uses: actions/cache@v4
       with:
         path: ~/toolchains/clang
-        key: google-clang-r450784e-v1
+        key: google-clang-r450784e-v2
 
     - name: Download Google Clang
       run: |
-        if [ ! -f ~/toolchains/clang/bin/clang ]; then
-          echo "Downloading Google Clang r450784e..."
+        set -e
+        CLANG_DIR="$HOME/toolchains/clang"
+        
+        if [ -f "$CLANG_DIR/bin/clang" ]; then
+          echo "Clang already cached"
+        else
+          echo "Downloading Google Clang..."
           mkdir -p ~/toolchains
           cd ~/toolchains
-          # Android 13 / GKI 5.15 推荐版本
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784e.tar.gz
-          mkdir -p clang
-          tar -xzf clang-r450784e.tar.gz -C clang
-          rm clang-r450784e.tar.gz
+          
+          # 尝试多个镜像
+          if wget -q --timeout=60 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784e.tar.gz" -O clang.tar.gz 2>/dev/null; then
+            echo "Downloaded from Android"
+            mkdir -p clang
+            tar -xzf clang.tar.gz -C clang
+            rm clang.tar.gz
+          elif wget -q --timeout=60 "https://github.com/llvm/llvm-project/releases/download/llvmorg-15.0.7/clang+llvm-15.0.7-x86_64-linux-gnu-ubuntu-22.04.tar.xz" -O clang.tar.xz 2>/dev/null; then
+            echo "Downloaded from GitHub"
+            tar -xf clang.tar.xz
+            mv clang+llvm-15.0.7-x86_64-linux-gnu-ubuntu-22.04 clang
+            rm clang.tar.xz
+          else
+            echo "ERROR: Failed to download Clang"
+            exit 1
+          fi
         fi
-        ~/toolchains/clang/bin/clang --version
-        echo "CLANG_PATH=$HOME/toolchains/clang/bin" >> $GITHUB_ENV
+        
+        # 验证
+        echo "Clang location: $CLANG_DIR"
+        ls -la "$CLANG_DIR/bin/" | head -5
+        "$CLANG_DIR/bin/clang" --version
+        
+        echo "CLANG_PATH=$CLANG_DIR/bin" >> $GITHUB_ENV
 
     - name: Build Kernel
       run: |
