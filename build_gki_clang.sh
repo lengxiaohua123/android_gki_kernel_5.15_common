@@ -30,10 +30,10 @@ fi
 echo "Using Google Clang: $CLANG_DIR"
 $CLANG_DIR/clang --version
 
-# ========== 关键修复：设置所有工具链变量 ==========
+# 设置工具链
+export PATH="$CLANG_DIR:$PATH"
 export ARCH=arm64
 export CROSS_COMPILE=aarch64-linux-gnu-
-export PATH="$CLANG_DIR:$PATH"
 export CC="$CLANG_DIR/clang"
 export AR="$CLANG_DIR/llvm-ar"
 export NM="$CLANG_DIR/llvm-nm"
@@ -58,53 +58,55 @@ cd "$KERNEL_SRC" || error "Cannot enter $KERNEL_SRC"
 log "Cleaning..."
 make ARCH=arm64 CC="$CC" LD="$LD" mrproper 2>/dev/null || true
 
-# ========== 关键修复：确保 scripts/config 可用 ==========
-log "Checking scripts/config..."
-if [ ! -x "scripts/config" ]; then
-    log "Generating build scripts..."
-    make ARCH=arm64 CC="$CC" LD="$LD" scripts 2>/dev/null || true
+# ========== 方法2：直接修改 gki_defconfig 文件 ==========
+log "Modifying gki_defconfig to add GUNYAH..."
+
+GKI_DEFCONFIG="arch/arm64/configs/gki_defconfig"
+
+# 检查 defconfig 文件是否存在
+if [ ! -f "$GKI_DEFCONFIG" ]; then
+    error "gki_defconfig not found at $GKI_DEFCONFIG"
 fi
 
-log "Generating gki_defconfig..."
+# 备份原文件
+cp "$GKI_DEFCONFIG" "$GKI_DEFCONFIG.bak.$(date +%s)"
+
+# 删除旧的 GUNYAH 配置（避免重复）
+sed -i '/^CONFIG_GUNYAH/d' "$GKI_DEFCONFIG" 2>/dev/null || true
+sed -i '/^CONFIG_GH_/d' "$GKI_DEFCONFIG" 2>/dev/null || true
+
+# 按字母顺序添加 GUNYAH 配置
+cat >> "$GKI_DEFCONFIG" << 'EOF'
+CONFIG_GH_DBL=y
+CONFIG_GH_IRQ_LEND=y
+CONFIG_GH_MEM_NOTIFIER=y
+CONFIG_GH_MSGQ=y
+CONFIG_GH_PROXY_SCHED=y
+CONFIG_GH_RM_DRV=y
+CONFIG_GH_SECURE_VM_LOADER=y
+CONFIG_GUNYAH=y
+CONFIG_GUNYAH_DRIVERS=y
+EOF
+
+log "✓ GUNYAH config added to gki_defconfig"
+
+# 重新生成 .config
+log "Generating .config from modified gki_defconfig..."
 make ARCH=arm64 CC="$CC" LD="$LD" gki_defconfig
 
-# ========== 关键修复：确保配置正确写入 ==========
-log "Enabling GUNYAH..."
-if [ -x "scripts/config" ]; then
-    # 方法1：使用 scripts/config（推荐）
-    ./scripts/config --enable CONFIG_GH_DBL
-    ./scripts/config --enable CONFIG_GH_IRQ_LEND
-    ./scripts/config --enable CONFIG_GH_MEM_NOTIFIER
-    ./scripts/config --enable CONFIG_GH_MSGQ
-    ./scripts/config --enable CONFIG_GH_PROXY_SCHED
-    ./scripts/config --enable CONFIG_GH_RM_DRV
-    ./scripts/config --enable CONFIG_GH_SECURE_VM_LOADER
-    ./scripts/config --enable CONFIG_GUNYAH
-    ./scripts/config --enable CONFIG_GUNYAH_DRIVERS
-else
-    # 方法2：直接修改 .config（备选）
-    log "Using direct .config modification..."
-    for cfg in CONFIG_GH_DBL CONFIG_GH_IRQ_LEND CONFIG_GH_MEM_NOTIFIER CONFIG_GH_MSGQ CONFIG_GH_PROXY_SCHED CONFIG_GH_RM_DRV CONFIG_GH_SECURE_VM_LOADER CONFIG_GUNYAH CONFIG_GUNYAH_DRIVERS; do
-        if grep -q "^# $cfg is not set" .config; then
-            sed -i "s/^# $cfg is not set/$cfg=y/" .config
-        elif ! grep -q "^$cfg=" .config; then
-            echo "$cfg=y" >> .config
-        fi
-    done
-fi
-
-# ========== 关键修复：同步配置依赖项 ==========
-log "Syncing configuration..."
-make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
-
-# ========== 关键修复：验证配置 ==========
+# 验证 GUNYAH 配置
 log "Verifying GUNYAH configuration..."
 if grep -q "^CONFIG_GUNYAH=y" .config; then
     log "✓ CONFIG_GUNYAH is enabled"
+    log "GUNYAH configs in .config:"
     grep -E "^CONFIG_(GH_|GUNYAH)" .config
 else
     error "CONFIG_GUNYAH not found in .config!"
 fi
+
+# 同步配置依赖项
+log "Syncing configuration..."
+make ARCH=arm64 CC="$CC" LD="$LD" olddefconfig
 
 log "Building kernel..."
 make ARCH=arm64 CC="$CC" LD="$LD" -j$(nproc) Image Image.gz 2>&1 | tee "$DIST_OUTPUT_DIR/build.log"
@@ -115,11 +117,11 @@ cp arch/arm64/boot/Image.gz "$DIST_OUTPUT_DIR/" 2>/dev/null || true
 cp vmlinux "$DIST_OUTPUT_DIR/" 2>/dev/null || true
 cp .config "$DIST_OUTPUT_DIR/config"
 
-# ========== 关键修复：验证输出 ==========
 [ -f "$DIST_OUTPUT_DIR/Image" ] || [ -f "$DIST_OUTPUT_DIR/Image.gz" ] || error "Build failed"
 
+# 验证输出 config
 log "Checking GUNYAH in output config..."
-grep -E "^CONFIG_(GH_|GUNYAH)" "$DIST_OUTPUT_DIR/config" || warn "GUNYAH not in output config!"
+grep -E "^CONFIG_(GH_|GUNYAH)" "$DIST_OUTPUT_DIR/config" || log "Warning: GUNYAH not found in output config"
 
 log "========================================"
 log "Build Complete!"
