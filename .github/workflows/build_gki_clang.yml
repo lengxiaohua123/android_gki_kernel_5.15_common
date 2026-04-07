@@ -1,4 +1,4 @@
-name: Build GKI with Clang (Native Compile)
+name: Build GKI with Google Clang
 
 on:
   schedule:
@@ -10,14 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
-    permissions:
-      contents: read
-
     steps:
     - name: Checkout Source
       uses: actions/checkout@v4
-      with:
-        submodules: recursive
 
     - name: Free Disk Space
       run: |
@@ -41,19 +36,38 @@ jobs:
         sudo apt-get install -y \
           git zip unzip curl wget python3 bc rsync \
           cpio ncurses-dev libxml2-utils build-essential \
-          flex bison libssl-dev libelf-dev \
-          clang llvm lld
-        clang --version
+          flex bison libssl-dev libelf-dev
+        # 不安装 clang，使用 Google 的
 
-    - name: Build Kernel with Clang
+    - name: Cache Google Clang
+      uses: actions/cache@v4
+      with:
+        path: ~/toolchains/clang
+        key: google-clang-r450784e-v1
+
+    - name: Download Google Clang
+      run: |
+        if [ ! -f ~/toolchains/clang/bin/clang ]; then
+          echo "Downloading Google Clang r450784e..."
+          mkdir -p ~/toolchains
+          cd ~/toolchains
+          # Android 13 / GKI 5.15 推荐版本
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r450784e.tar.gz
+          mkdir -p clang
+          tar -xzf clang-r450784e.tar.gz -C clang
+          rm clang-r450784e.tar.gz
+        fi
+        ~/toolchains/clang/bin/clang --version
+        echo "CLANG_PATH=$HOME/toolchains/clang/bin" >> $GITHUB_ENV
+
+    - name: Build Kernel
       run: |
         chmod +x build_gki_clang.sh
         ./build_gki_clang.sh
 
-    - name: Upload Kernel Artifacts
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: GKI-Kernel-5.15-Gunyah
-        path: |
-          out/dist/*
+        path: out/dist/*
         retention-days: 30
