@@ -60,7 +60,7 @@ jobs:
           cd ~/toolchains
           
           # 尝试多个镜像
-          if wget -q --timeout=60 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-stable.tar.gz" -O clang.tar.gz 2>/dev/null; then
+          if wget -q --timeout=60 "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz" -O clang.tar.gz 2>/dev/null; then
             echo "Downloaded from Android"
             mkdir -p clang
             tar -xzf clang.tar.gz -C clang
