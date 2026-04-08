@@ -211,4 +211,42 @@ config QCOM_APR
 	  application processor and QDSP6. APR is
 	  used by audio driver to configure QDSP6
 	  ASM, ADM and AFE modules.
+
+config QCOM_TLMM_VM_IRQCHIP
+       tristate "Qualcomm Technologies, Inc. TLMM VM irqchip driver"
+       help
+         Qualcomm Technologies, Inc. TLMM VM irqchip driver for MSM devices. The
+         driver acts as a parent interrupt controller for tlmm driver for VMs.
+         Say Y here to compile the driver as a part of kernel or M to compile
+         as a module.
+
+config GH_TLMM_VM_MEM_ACCESS
+        tristate "Qualcomm Technologies, Inc. TLMM VM mem access driver"
+        depends on GH_RM_DRV
+        help
+         Qualcomm Technologies, Inc. TLMM VM mem access driver for MSM devices.
+         The drivers provides initial gpio memory access to VM.
+         Say Y here to compile the driver as a part of kernel or M to compile
+         as a module.
+
+config QCOM_GUESTVM
+        tristate "Enable Guest VM to be loaded by PIL"
+        select QCOM_MDT_LOADER
+        help
+           This driver invokes Peripheral Image Loader to load images of
+           any guest Virtual Machine (VM). It also communicates with the
+           Resource Manager driver to start the boot of VMs once it has
+           successfully loaded the VM images in the designated memory.
+
+config QCOM_HYP_CORE_CTL
+        tristate "CPU reservation scheme for Hypervisor"
+        depends on QCOM_GUESTVM && SCHED_WALT
+        help
+          This driver reserve the specified CPUS by isolating them. The reserved
+          CPUs can be assigned to the other guest OS by the hypervisor.
+          An offline CPU is considered as a reserved CPU since this OS can't use
+          it.
+
+source "drivers/soc/qcom/mem_buf/Kconfig" 
+
 endmenu
