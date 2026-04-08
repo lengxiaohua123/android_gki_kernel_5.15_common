@@ -1,0 +1,210 @@
+name: Compare Repository Differences
+
+on:
+  # 手动触发
+  workflow_dispatch:
+  
+  # 定时触发（可选，每天 UTC 00:00 运行）
+  schedule:
+    - cron: '0 0 * * *'
+  
+  # 推送到主分支时触发（可选）
+  push:
+    branches: [ main, master ]
+
+jobs:
+  compare-repos:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+      
+      - name: Clone Repository A (MiCode/Xiaomi_Kernel_OpenSource)
+        run: |
+          git clone --depth 1 --branch socrates-t-oss \
+            https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git \
+            repo-a
+          echo "Repository A cloned successfully"
+          echo "A_REPO_PATH=$(pwd)/repo-a" >> $GITHUB_ENV
+      
+      - name: Clone Repository B (lengxiaohua123/android_gki_kernel_5.15_common)
+        run: |
+          git clone --depth 1 --branch serein \
+            https://github.com/lengxiaohua123/android_gki_kernel_5.15_common.git \
+            repo-b
+          echo "Repository B cloned successfully"
+          echo "B_REPO_PATH=$(pwd)/repo-b" >> $GITHUB_ENV
+      
+      - name: Compare directories and files
+        run: |
+          mkdir -p comparison-result
+          
+          echo "========================================" > comparison-result/missing_in_b.txt
+          echo "仓库 B 相对于仓库 A 缺少的目录和文件" >> comparison-result/missing_in_b.txt
+          echo "比较时间: $(date '+%Y-%m-%d %H:%M:%S')" >> comparison-result/missing_in_b.txt
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "" >> comparison-result/missing_in_b.txt
+          
+          echo "仓库 A: MiCode/Xiaomi_Kernel_OpenSource (分支: socrates-t-oss)" >> comparison-result/missing_in_b.txt
+          echo "仓库 B: lengxiaohua123/android_gki_kernel_5.15_common (分支: serein)" >> comparison-result/missing_in_b.txt
+          echo "" >> comparison-result/missing_in_b.txt
+          
+          # 生成 A 仓库的文件列表（排除 Doc 和 Documentation 目录）
+          echo "正在扫描仓库 A 的文件结构..."
+          find repo-a -type f ! -path "*/Doc/*" ! -path "*/Documentation/*" ! -path "*/.git/*" | \
+            sed 's|^repo-a/||' | sort > comparison-result/all_files_a.txt
+          
+          # 生成 B 仓库的文件列表（排除 Doc 和 Documentation 目录）
+          echo "正在扫描仓库 B 的文件结构..."
+          find repo-b -type f ! -path "*/Doc/*" ! -path "*/Documentation/*" ! -path "*/.git/*" | \
+            sed 's|^repo-b/||' | sort > comparison-result/all_files_b.txt
+          
+          # 找出 B 缺少的文件（在 A 中有但 B 中没有）
+          echo "正在比较文件差异..."
+          comm -23 comparison-result/all_files_a.txt comparison-result/all_files_b.txt > comparison-result/missing_files.txt
+          
+          # 生成目录列表
+          echo "正在分析目录结构..."
+          find repo-a -type d ! -path "*/Doc" ! -path "*/Doc/*" ! -path "*/Documentation" ! -path "*/Documentation/*" ! -path "*/.git/*" | \
+            sed 's|^repo-a/||' | sort > comparison-result/all_dirs_a.txt
+          
+          find repo-b -type d ! -path "*/Doc" ! -path "*/Doc/*" ! -path "*/Documentation" ! -path "*/Documentation/*" ! -path "*/.git/*" | \
+            sed 's|^repo-b/||' | sort > comparison-result/all_dirs_b.txt
+          
+          # 找出 B 缺少的目录
+          comm -23 comparison-result/all_dirs_a.txt comparison-result/all_dirs_b.txt > comparison-result/missing_dirs.txt
+          
+          # 生成报告
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "缺少的目录 (Missing Directories)" >> comparison-result/missing_in_b.txt
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "" >> comparison-result/missing_in_b.txt
+          
+          if [ -s comparison-result/missing_dirs.txt ]; then
+            cat comparison-result/missing_dirs.txt >> comparison-result/missing_in_b.txt
+            DIR_COUNT=$(wc -l < comparison-result/missing_dirs.txt)
+            echo "" >> comparison-result/missing_in_b.txt
+            echo "总计: $DIR_COUNT 个目录" >> comparison-result/missing_in_b.txt
+          else
+            echo "无缺少的目录" >> comparison-result/missing_in_b.txt
+            DIR_COUNT=0
+          fi
+          
+          echo "" >> comparison-result/missing_in_b.txt
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "缺少的文件 (Missing Files)" >> comparison-result/missing_in_b.txt
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "" >> comparison-result/missing_in_b.txt
+          
+          if [ -s comparison-result/missing_files.txt ]; then
+            cat comparison-result/missing_files.txt >> comparison-result/missing_in_b.txt
+            FILE_COUNT=$(wc -l < comparison-result/missing_files.txt)
+            echo "" >> comparison-result/missing_in_b.txt
+            echo "总计: $FILE_COUNT 个文件" >> comparison-result/missing_in_b.txt
+          else
+            echo "无缺少的文件" >> comparison-result/missing_in_b.txt
+            FILE_COUNT=0
+          fi
+          
+          # 生成统计摘要
+          echo "" >> comparison-result/missing_in_b.txt
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "统计摘要" >> comparison-result/missing_in_b.txt
+          echo "========================================" >> comparison-result/missing_in_b.txt
+          echo "" >> comparison-result/missing_in_b.txt
+          echo "仓库 A 总文件数: $(wc -l < comparison-result/all_files_a.txt)" >> comparison-result/missing_in_b.txt
+          echo "仓库 B 总文件数: $(wc -l < comparison-result/all_files_b.txt)" >> comparison-result/missing_in_b.txt
+          echo "仓库 A 总目录数: $(wc -l < comparison-result/all_dirs_a.txt)" >> comparison-result/missing_in_b.txt
+          echo "仓库 B 总目录数: $(wc -l < comparison-result/all_dirs_b.txt)" >> comparison-result/missing_in_b.txt
+          echo "" >> comparison-result/missing_in_b.txt
+          echo "B 相对于 A 缺少:" >> comparison-result/missing_in_b.txt
+          echo "  - 目录: $DIR_COUNT 个" >> comparison-result/missing_in_b.txt
+          echo "  - 文件: $FILE_COUNT 个" >> comparison-result/missing_in_b.txt
+          
+          # 生成 JSON 格式的详细报告
+          cat > comparison-result/report.json << EOF
+          {
+            "comparison_time": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "repository_a": {
+              "url": "https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git",
+              "branch": "socrates-t-oss",
+              "total_files": $(wc -l < comparison-result/all_files_a.txt),
+              "total_dirs": $(wc -l < comparison-result/all_dirs_a.txt)
+            },
+            "repository_b": {
+              "url": "https://github.com/lengxiaohua123/android_gki_kernel_5.15_common.git",
+              "branch": "serein",
+              "total_files": $(wc -l < comparison-result/all_files_b.txt),
+              "total_dirs": $(wc -l < comparison-result/all_dirs_b.txt)
+            },
+            "missing_in_b": {
+              "directories_count": $DIR_COUNT,
+              "files_count": $FILE_COUNT,
+              "directories": [
+          $(if [ -s comparison-result/missing_dirs.txt ]; then sed 's/^/    "/; s/$/",/' comparison-result/missing_dirs.txt | sed '$ s/,$//'; fi)
+              ],
+              "files": [
+          $(if [ -s comparison-result/missing_files.txt ]; then sed 's/^/    "/; s/$/",/' comparison-result/missing_files.txt | sed '$ s/,$//'; fi)
+              ]
+            }
+          }
+          EOF
+          
+          echo "比较完成！"
+          cat comparison-result/missing_in_b.txt
+      
+      - name: Create summary for GitHub Actions
+        run: |
+          echo "## 仓库比较结果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**仓库 A**: [MiCode/Xiaomi_Kernel_OpenSource](https://github.com/MiCode/Xiaomi_Kernel_OpenSource) (分支: \`socrates-t-oss\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**仓库 B**: [lengxiaohua123/android_gki_kernel_5.15_common](https://github.com/lengxiaohua123/android_gki_kernel_5.15_common) (分支: \`serein\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          DIR_COUNT=$(wc -l < comparison-result/missing_dirs.txt)
+          FILE_COUNT=$(wc -l < comparison-result/missing_files.txt)
+          
+          echo "### 📊 统计摘要" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 项目 | 数量 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 缺少的目录 | $DIR_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "| 缺少的文件 | $FILE_COUNT |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -s comparison-result/missing_dirs.txt ]; then
+            echo "### 📁 缺少的目录（前 20 个）" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            head -20 comparison-result/missing_dirs.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -s comparison-result/missing_files.txt ]; then
+            echo "### 📄 缺少的文件（前 50 个）" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            head -50 comparison-result/missing_files.txt >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Package results
+        run: |
+          cd comparison-result
+          zip -r ../repo-comparison-result.zip .
+          cd ..
+          ls -lh repo-comparison-result.zip
+      
+      - name: Upload comparison results
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-comparison-result
+          path: repo-comparison-result.zip
+          retention-days: 30
+      
+      - name: Cleanup
+        run: |
+          rm -rf repo-a repo-b
